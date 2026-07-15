@@ -90,6 +90,36 @@ class TestValidatePlanCommand(unittest.TestCase):
         self.assertNotEqual(out["violations"], [])
 
 
+class TestIntakeCommand(unittest.TestCase):
+    def test_intake_alertmanager_webhook(self):
+        payload = {"alerts": [{
+            "fingerprint": "abc123",
+            "labels": {"alertname": "HighErrorRate",
+                       "service": "payment-api", "severity": "critical"},
+            "startsAt": "2026-07-15T10:08:00Z",
+        }]}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "webhook.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            code, out = run_cli("intake", "--file", str(path),
+                                "--format", "alertmanager")
+        self.assertEqual(code, 0)
+        inc = out["incidents"][0]
+        self.assertTrue(inc["incident_id"].startswith("inc-"))
+        self.assertTrue(inc["created"])
+        self.assertEqual(inc["service"], "payment-api")
+
+    def test_intake_unknown_format_exit_two(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "webhook.json"
+            path.write_text("{}", encoding="utf-8")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                code = cli.main(["intake", "--file", str(path),
+                                 "--format", "zabbix"])
+        self.assertEqual(code, 2)
+
+
 class TestValidateEnrichmentCommand(unittest.TestCase):
     def test_enrichment_with_uncovered_fact_exit_one(self):
         enr = {"incident_id": "inc-x",

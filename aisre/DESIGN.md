@@ -47,8 +47,33 @@ L3_AUTO / SUSPENDED)属于 F12,本期只落枚举与默认值。
 "未缓解的事故不算数"造成基线偏乐观。变更失败率与事故分开统计,
 两者关联(哪次变更引发哪次事故)是第 3–4 周变更连接器的职责。
 
+### 5. 接入层的幂等靠确定性 id,不靠状态查询(第 3–4 周)
+
+`incident_id = "inc-" + sha1(source|fingerprint)[:12]`:同一告警指纹在任何
+实例、任何时刻得到同一 id。重复投递天然幂等(F01 的 2 秒返回不需要查库),
+回放历史告警可精确复现当时的事故编号。去重键是 `(source, fingerprint)`,
+活跃事故期间的重复告警合并、不重复触发丰富工作流。解析失败显式抛错
+(`UnknownFormat` / `MalformedPayload`)——接入层丢告警是最不可接受的失败模式。
+
+### 6. 采集的失败语义分三种,超时不重试
+
+连接器只读(client 注入,无写路径),失败语义:`ok` / `failed`(异常,
+含一次受控重试)/ `timeout`(标缺失,不重试——超时源再重试会吃掉整体预算,
+宁可缺失不阻塞发布)。`collect_context` 线程池并行,全部源共享同一墙钟
+截止点,整体耗时 ≈ 最慢单源;超时线程不等待收尾(`shutdown(wait=False)`)。
+这是 90 秒丰富预算里"并行查询 40s、80s 未返回标缺失"的机制化。
+
+### 7. 证据不可篡改分两道防线
+
+写入口:同一事故内 `evidence_id` 不允许覆盖(`DuplicateEvidence`),追加式
+write-through 落盘;审计口:每条证据存规范化 JSON 的 sha256,`verify` 重算
+比对可发现落盘后被篡改的记录。证据按事故隔离成单文件,回放时按
+`incident_id` 整体装载。
+
 ## 测试
 
-64 个 unittest,TDD 逐模块 red-green:
-scenarios(7) / schemas(14) / actions(19) / catalog(11) / baseline(8) / cli(5)。
-CLI 测试直接调 `cli.main(argv)` 断言退出码与 JSON 输出,不起子进程。
+94 个 unittest,TDD 逐模块 red-green:
+scenarios(7) / schemas(14) / actions(19) / catalog(11) / baseline(8) /
+intake(10) / connectors(9) / evidence_store(8) / e2e-intake-flow(1) / cli(7)。
+CLI 测试直接调 `cli.main(argv)` 断言退出码与 JSON 输出,不起子进程;
+并行/超时行为用可控的假 client(sleep/抛错)验证,不依赖真实数据源。

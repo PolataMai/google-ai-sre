@@ -17,6 +17,7 @@ from pathlib import Path
 
 from aisre.actions import ActionPlan, validate_action_plan
 from aisre.baseline import ChangeRecord, IncidentRecord, compute_baseline
+from aisre.intake import IntakeService, MalformedPayload, UnknownFormat
 from aisre.scenarios import get_scenario, list_scenarios
 from aisre.schemas import Enrichment, evidence_coverage, validate_enrichment
 
@@ -72,6 +73,21 @@ def _cmd_validate_enrichment(args) -> int:
     return 1 if violations else 0
 
 
+def _cmd_intake(args) -> int:
+    payload = json.loads(Path(args.file).read_text(encoding="utf-8"))
+    try:
+        results = IntakeService().intake(payload, args.format)
+    except (UnknownFormat, MalformedPayload) as exc:
+        _print({"error": str(exc)})
+        return 2
+    _print({"incidents": [
+        {"incident_id": r.incident_id, "created": r.created,
+         "service": r.alert.service, "severity": r.alert.severity,
+         "source": r.alert.source, "starts_at": r.alert.starts_at}
+        for r in results]})
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="aisre")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -93,12 +109,18 @@ def main(argv=None) -> int:
     p_enr = sub.add_parser("validate-enrichment", help="校验告警丰富结果")
     p_enr.add_argument("--file", required=True, help="Enrichment JSON 文件")
 
+    p_intake = sub.add_parser("intake", help="接入告警 Webhook,生成统一 incident_id")
+    p_intake.add_argument("--file", required=True, help="Webhook 负载 JSON 文件")
+    p_intake.add_argument("--format", required=True,
+                          help="alertmanager / pagerduty / custom")
+
     args = parser.parse_args(argv)
     handlers = {
         "scenarios": _cmd_scenarios,
         "baseline": _cmd_baseline,
         "validate-plan": _cmd_validate_plan,
         "validate-enrichment": _cmd_validate_enrichment,
+        "intake": _cmd_intake,
     }
     return handlers[args.command](args)
 
