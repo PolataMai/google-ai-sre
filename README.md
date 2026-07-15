@@ -10,7 +10,7 @@ Python 引擎。零第三方依赖(Python ≥ 3.10),纯 stdlib + unittest。
 | 目录 | 定位 | 测试 |
 |---|---|---|
 | [ai-sre/](ai-sre/) | 方案文档:文章能力全景 → 逐项实现方案 → 三组件架构 → 12 周交付计划 | — |
-| [aisre/](aisre/) | AI SRE MVP(12 周计划全部交付,开发完成):契约/取证/丰富/评测/执行网关 + Guardian/生产 Shadow | 213 |
+| [aisre/](aisre/) | AI SRE MVP(12 周全部交付 + 加固):契约/取证/丰富/评测/执行网关 + Guardian/生产 Shadow + L3 准入门禁 | 243 |
 | [rca/](rca/) | 故障根因定位引擎:日志+变更并行取证 → code graph 集合运算裁决 → 证据链分级结论 | 71 |
 | [changeflow/](changeflow/) | 统一变更数据平台:五源变更时间线、风险画像、三道门准入、异常-变更关联 | 22 |
 

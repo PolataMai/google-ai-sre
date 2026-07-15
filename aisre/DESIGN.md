@@ -142,9 +142,15 @@ guardian.py 消费一串观测快照逐个裁决,优先级:恶化信号立即回
 拿不到 SLI(空观测 / 指标缺失)不当作"没事",而是止血——与网关"依赖不可用
 即拒绝"同源。回滚执行补偿动作(plan.rollback),并经 on_rollback 把该 scope
 熔断为 SUSPENDED;由 catalog 状态机保证熔断后不能自动恢复 L3,只能回 SHADOW/L2
-重新爬。success_criteria 的求值(evaluate_criterion)是我在下游补的正则解析
-——更严谨该在 actions.py 契约层就把条件设计成结构化的 {metric,op,threshold},
-这是一处明确的技术债:非常规格式会被解析成"未决"而永远触发超时回滚。
+重新爬。
+
+（原技术债已偿还）成功条件早期是 Guardian 里的下游正则,非法格式会静默变成
+"永久未决→超时回滚"。现已上移到契约层:actions.py 的 `SuccessCriterion`
+{metric, op, threshold} 在 `ActionPlan.__post_init__` 构造时归一并校验,
+非法格式当场抛 ValueError(响亮失败);`SuccessCriterion.evaluate` 只在
+"指标缺失"这一合法情形返回 None。网关的 contract 环跑 validate_action_plan,
+畸形计划在执行前就被拒,永不会到 Guardian 触发静默超时。Guardian 只调
+`criterion.evaluate(obs)`,不再自己解析——单一事实源,消除重复正则。
 
 ### 18. Shadow 的"不执行"是结构性的,不靠自觉
 
@@ -155,14 +161,29 @@ Shadow 与真执行共用同一个 EnrichmentRun + draft_plan,保证累积的案
 是组合已各自 TDD 建成的 Guardian + gateway + catalog 的集成断言,不重复单元
 覆盖,只守"恶化即回滚 + 熔断 + 拒绝后续"的跨模块闭环。
 
+### 19. L3 准入是代码强制的闸门,不是文档口号(开发完成后加固)
+
+"开发完成 ≠ 指标达标"从 README 的一句话变成 admission.py 的硬门禁:
+`evaluate_l3_admission(PilotMetrics)` 逐条检查方案 §10+§9 的 L3 条件——
+≥8 周试点且 ≥30 有效事故、≥500 案例、≥50 真实 L2 执行、连续 8 周达标、
+点估计 ≥99.6% 精确匹配、策略绕过/严重错误动作/AI 致严重事故均为 0、
+故障注入 100%、AI 变更失败率不高于人工基线、双人批准——任一不满足即拒绝。
+关键性质(test_admission 的核心用例):开发完成(代码全绿、回放刷满 500
+Shadow 案例)因缺真实执行/试点时长/业务对照/双人批准而 l3_eligible=False。
+board.py(§9 看板)与 admission.py(§10 闸门)分工:board 展示"你在哪",
+只给 `l3_readiness_preview`(开发侧四项),明确 `authoritative_gate` 指向
+admission;两者不共用 `l3_eligible`,避免"看板达标"被误读成"已授权"。
+晋级程序只计算是否达标,`dual_approved` 这道门保证最终仍需人拍板。
+
 ## 测试
 
-213 个 unittest,TDD 逐模块 red-green:
-scenarios(7) / schemas(14) / actions(19) / catalog(15) / baseline(8) /
-intake(10) / connectors(9) / evidence_store(8) / e2e-intake-flow(1) /
-facts(8) / hypotheses(8) / enrichment(7) / workbench(8) /
-gold(8) / planner(6) / replay(5) / evaluation(6) / board(7) /
+243 个 unittest,TDD 逐模块 red-green:
+scenarios(7) / schemas(14) / actions(19) / success_criteria(14) /
+catalog(15) / baseline(8) / intake(10) / connectors(9) /
+evidence_store(8) / e2e-intake-flow(1) / facts(8) / hypotheses(8) /
+enrichment(7) / workbench(8) / gold(8) / planner(6) / replay(5) /
+evaluation(6) / board(7) / admission(17) /
 identity(6) / policy(6) / gateway(20,含 catalog 状态机 4) /
-guardian(13) / shadow(4) / fault-injection(2) / cli(8)。
+guardian(9) / shadow(4) / fault-injection(2) / cli(11)。
 CLI 测试直接调 `cli.main(argv)` 断言退出码与 JSON 输出,不起子进程;
 并行/超时行为用可控的假 client(sleep/抛错)验证,不依赖真实数据源。

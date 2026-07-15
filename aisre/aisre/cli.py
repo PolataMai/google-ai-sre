@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 from aisre.actions import ActionPlan, validate_action_plan
+from aisre.admission import PilotMetrics, evaluate_l3_admission
 from aisre.baseline import ChangeRecord, IncidentRecord, compute_baseline
 from aisre.evaluation import evaluate_replays
 from aisre.intake import IntakeService, MalformedPayload, UnknownFormat
@@ -55,8 +56,14 @@ def _cmd_baseline(args) -> int:
 
 
 def _cmd_validate_plan(args) -> int:
-    plan = ActionPlan.from_dict(
-        json.loads(Path(args.file).read_text(encoding="utf-8")))
+    raw = json.loads(Path(args.file).read_text(encoding="utf-8"))
+    try:
+        plan = ActionPlan.from_dict(raw)
+    except (ValueError, TypeError, KeyError) as exc:
+        # 契约层的响亮失败(如非法 success_criteria)也当作违规报告,不崩溃
+        _print({"action_id": raw.get("action_id"),
+                "violations": [f"计划结构非法: {exc}"]})
+        return 1
     scenario = get_scenario(args.scenario) if args.scenario else None
     violations = validate_action_plan(plan, now=args.now, scenario=scenario)
     _print({"action_id": plan.action_id,
@@ -97,6 +104,20 @@ def _cmd_replay(args) -> int:
     return 0
 
 
+def _cmd_admission(args) -> int:
+    """L3 准入门禁:读试点指标 JSON，输出授权决定。
+    不达标退出码 1——开发完成不能凭空开 L3。"""
+    raw = json.loads(Path(args.file).read_text(encoding="utf-8"))
+    try:
+        metrics = PilotMetrics(**raw)
+    except TypeError as exc:
+        _print({"error": f"试点指标字段不完整: {exc}"})
+        return 2
+    decision = evaluate_l3_admission(metrics)
+    _print(decision.to_dict())
+    return 0 if decision.l3_eligible else 1
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="aisre")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -126,6 +147,9 @@ def main(argv=None) -> int:
     p_replay = sub.add_parser("replay", help="回放历史案例并输出评测报告")
     p_replay.add_argument("--cases", required=True, help="ReplayCase JSONL 文件")
 
+    p_adm = sub.add_parser("admission", help="L3 准入门禁(读试点指标,达标才退出 0)")
+    p_adm.add_argument("--file", required=True, help="试点指标 JSON 文件")
+
     args = parser.parse_args(argv)
     handlers = {
         "scenarios": _cmd_scenarios,
@@ -134,6 +158,7 @@ def main(argv=None) -> int:
         "validate-enrichment": _cmd_validate_enrichment,
         "intake": _cmd_intake,
         "replay": _cmd_replay,
+        "admission": _cmd_admission,
     }
     return handlers[args.command](args)
 

@@ -53,24 +53,29 @@ class TestBoard(unittest.TestCase):
                                                "met": False})
         self.assertEqual(adm["real_l2_executions"], {"value": 5, "target": 50,
                                                      "met": False})
-        self.assertFalse(adm["l3_eligible"])
+        self.assertFalse(adm["l3_readiness_preview"])
+        # board 只给就绪预览,授权门禁另在 admission 模块
+        self.assertIn("authoritative_gate", adm)
 
-    def test_l3_eligibility_requires_all_gates(self):
+    def test_readiness_preview_is_only_dev_side_not_authoritative(self):
+        # 开发侧四项都满足 → 预览为 True,但这只是"就绪预览",
+        # 不是 L3 授权(授权须过 admission.evaluate_l3_admission 的试点门禁)
         board = build_board(
             enrichment_latencies=[60.0],
             evidence_coverages=[1.0],
             eval_report=make_eval_report(),
             shadow_cases=520, real_l2_executions=55, gold_labels=200,
             policy_bypasses=0, severe_wrong_actions=0)
-        self.assertTrue(board["admission"]["l3_eligible"])
-        # 任一安全事件直接否决
+        self.assertTrue(board["admission"]["l3_readiness_preview"])
+        self.assertNotIn("l3_eligible", board["admission"])  # 不冒充授权
+        # 任一安全事件直接否决预览
         board2 = build_board(
             enrichment_latencies=[60.0],
             evidence_coverages=[1.0],
             eval_report=make_eval_report(),
             shadow_cases=520, real_l2_executions=55, gold_labels=200,
             policy_bypasses=0, severe_wrong_actions=1)
-        self.assertFalse(board2["admission"]["l3_eligible"])
+        self.assertFalse(board2["admission"]["l3_readiness_preview"])
         self.assertFalse(board2["safety"]["clean"])
 
     def test_board_serializable_and_has_business_section(self):
@@ -87,4 +92,4 @@ class TestBoard(unittest.TestCase):
                             severe_wrong_actions=0)
         self.assertIsNone(board["agent"]["enrichment_p95_s"])
         self.assertIsNone(board["agent"]["top3_recall"])
-        self.assertFalse(board["admission"]["l3_eligible"])
+        self.assertFalse(board["admission"]["l3_readiness_preview"])

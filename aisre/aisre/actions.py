@@ -13,13 +13,102 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from dataclasses import dataclass, field
+import re
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Union
 
 from aisre.scenarios import ScenarioDef
 
 ALLOWED_ACTION_TYPES = ("scale_out", "rollback_release")
+
+_NUMERIC_OPS = {
+    "<": lambda a, b: a < b,
+    "<=": lambda a, b: a <= b,
+    ">": lambda a, b: a > b,
+    ">=": lambda a, b: a >= b,
+}
+_CRITERION_RE = re.compile(r"^(\w+)\s*(<=|>=|<|>)\s*([0-9]+(?:\.[0-9]+)?)(%?)$")
+_FLAG_RE = re.compile(r"^\w+$")
+
+
+@dataclass(frozen=True)
+class SuccessCriterion:
+    """结构化成功条件(契约层):数值比较 {metric, op, threshold},
+    或命名布尔 {metric, op="is_true", threshold=None}。
+
+    构造即校验:op 与 threshold 不匹配当场抛 ValueError;非法输入不会
+    悄悄存活到 Guardian 变成"永久未决"。
+    """
+    metric: str
+    op: str                            # < <= > >= 或 is_true
+    threshold: Optional[float] = None
+
+    def __post_init__(self):
+        if self.op == "is_true":
+            if self.threshold is not None:
+                raise ValueError(f"布尔条件 {self.metric} 不应带 threshold")
+        elif self.op in _NUMERIC_OPS:
+            if not isinstance(self.threshold, (int, float)) \
+                    or isinstance(self.threshold, bool):
+                raise ValueError(
+                    f"数值条件 {self.metric}{self.op} 需要数值 threshold,"
+                    f"当前 {self.threshold!r}")
+        else:
+            raise ValueError(f"未知比较符 {self.op!r}(仅支持 "
+                             f"{sorted(_NUMERIC_OPS)} 或 is_true)")
+
+    @classmethod
+    def parse(cls, s: str) -> "SuccessCriterion":
+        """从人类简写解析:"error_rate<1%" / "sli_recovered_5m"。
+        非法格式抛 ValueError(响亮失败,不静默)。"""
+        text = (s or "").strip()
+        m = _CRITERION_RE.match(text)
+        if m:
+            metric, op, num, pct = m.groups()
+            threshold = float(num) / 100 if pct else float(num)
+            return cls(metric=metric, op=op, threshold=threshold)
+        if _FLAG_RE.match(text):
+            return cls(metric=text, op="is_true", threshold=None)
+        raise ValueError(f"无法解析成功条件: {s!r}")
+
+    def evaluate(self, observation: dict) -> Optional[bool]:
+        """返回 True/False;仅当指标在观测中缺失时返回 None(合法未决)。"""
+        if self.op == "is_true":
+            if self.metric not in observation:
+                return None
+            return bool(observation[self.metric])
+        observed = observation.get(self.metric)
+        if not isinstance(observed, (int, float)) or isinstance(observed, bool):
+            return None
+        return _NUMERIC_OPS[self.op](observed, self.threshold)
+
+    def to_dict(self) -> dict:
+        return {"metric": self.metric, "op": self.op,
+                "threshold": self.threshold}
+
+    @staticmethod
+    def from_dict(d: dict) -> "SuccessCriterion":
+        return SuccessCriterion(metric=d["metric"], op=d["op"],
+                                threshold=d.get("threshold"))
+
+    def __str__(self) -> str:
+        if self.op == "is_true":
+            return self.metric
+        return f"{self.metric}{self.op}{self.threshold}"
+
+
+CriterionInput = Union["SuccessCriterion", dict, str]
+
+
+def _coerce_criterion(c: CriterionInput) -> SuccessCriterion:
+    if isinstance(c, SuccessCriterion):
+        return c
+    if isinstance(c, dict):
+        return SuccessCriterion.from_dict(c)
+    if isinstance(c, str):
+        return SuccessCriterion.parse(c)
+    raise TypeError(f"success_criteria 元素类型非法: {type(c)}")
 
 
 def _parse_ts(ts: str) -> datetime:
@@ -38,11 +127,17 @@ class ActionPlan:
     target: dict                      # cluster / namespace / workload
     parameters: dict
     preconditions: list[str]
-    success_criteria: list[str]
+    success_criteria: list                # 归一为 list[SuccessCriterion]
     rollback: dict                    # 补偿动作定义
     idempotency_key: str
     expires_at: str
     dry_run_required: bool = True
+
+    def __post_init__(self):
+        # 契约层归一:字符串/字典/对象一律转成 SuccessCriterion,
+        # 非法格式在此当场抛错(不留到 Guardian 变成静默超时回滚)。
+        self.success_criteria = [_coerce_criterion(c)
+                                 for c in self.success_criteria]
 
     def to_dict(self) -> dict:
         return {
@@ -53,7 +148,7 @@ class ActionPlan:
             "target": dict(self.target),
             "parameters": dict(self.parameters),
             "preconditions": list(self.preconditions),
-            "success_criteria": list(self.success_criteria),
+            "success_criteria": [c.to_dict() for c in self.success_criteria],
             "rollback": dict(self.rollback),
             "idempotency_key": self.idempotency_key,
             "expires_at": self.expires_at,

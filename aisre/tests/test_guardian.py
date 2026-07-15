@@ -9,7 +9,7 @@
 """
 import unittest
 
-from aisre.guardian import GuardianVerdict, evaluate_criterion, guard
+from aisre.guardian import GuardianVerdict, guard
 from tests.test_actions import make_rollback_release, make_scale_out
 
 
@@ -21,29 +21,8 @@ class FakeGuardianExecutor:
         self.rollbacks.append(plan.action_id)
         return {"status": "compensated", "compensation": plan.rollback}
 
-
-class TestEvaluateCriterion(unittest.TestCase):
-    def test_numeric_less_than_percent(self):
-        self.assertIs(evaluate_criterion("error_rate<1%",
-                                         {"error_rate": 0.008}), True)
-        self.assertIs(evaluate_criterion("error_rate<1%",
-                                         {"error_rate": 0.02}), False)
-
-    def test_numeric_plain_threshold(self):
-        self.assertIs(evaluate_criterion("slo_burn_rate<2",
-                                         {"slo_burn_rate": 1.5}), True)
-        self.assertIs(evaluate_criterion("slo_burn_rate<2",
-                                         {"slo_burn_rate": 2.5}), False)
-
-    def test_named_boolean(self):
-        self.assertIs(evaluate_criterion("sli_recovered_5m",
-                                         {"sli_recovered_5m": True}), True)
-        self.assertIs(evaluate_criterion("sli_recovered_5m",
-                                         {"sli_recovered_5m": False}), False)
-
-    def test_missing_metric_is_undecided(self):
-        self.assertIsNone(evaluate_criterion("error_rate<1%", {}))
-        self.assertIsNone(evaluate_criterion("unknown_flag", {}))
+# 成功条件的求值语义已移到契约层 SuccessCriterion,单元覆盖见
+# tests/test_success_criteria.py;此处只测 guard() 的编排行为。
 
 
 class TestGuardSuccess(unittest.TestCase):

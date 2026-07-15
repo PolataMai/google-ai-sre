@@ -1,11 +1,13 @@
-"""指标看板(F13):业务、Agent、安全、准入四区统一展示。
+"""指标看板(F13 / 方案 §9):业务、Agent、安全、准入四区统一展示。
 
 原则:所有指标从事件记录计算——输入是延迟记录、覆盖率记录、评测报告、
-存储计数,不接受手填结果数字。L3 准入逐门槛给出 met/未met,任一安全
-事件(策略绕过/严重错误动作)直接否决资格,与方案的准入条件一致。
+存储计数,不接受手填结果数字。
 
-本期(第 7–8 周)先落 Agent/安全/准入三区的完整计算;业务区(MTTM 对比
-基线、客户影响分钟)依赖真实试点数据,MVP 阶段展示数据规模与就绪度。
+与 L3 授权分工:board 是仪表盘(展示"你在哪"),准入区只给开发侧的
+`l3_readiness_preview`(shadow/real_l2/质量/安全四项),并用
+`authoritative_gate` 明确指向真正的闸门 admission.evaluate_l3_admission。
+真正开 L3 须过 admission 的完整门禁(≥8 周试点、连续达标、业务对照基线、
+双人批准等,只能来自真实试点数据)——board 达标不等于已授权。
 """
 from __future__ import annotations
 
@@ -76,7 +78,12 @@ def build_board(*, enrichment_latencies: list[float],
         "admission": {
             "shadow_cases": shadow_gate,
             "real_l2_executions": l2_gate,
-            "l3_eligible": (shadow_gate["met"] and l2_gate["met"]
-                            and quality_gates_met and safety_clean),
+            # 这是开发侧"就绪预览",不是 L3 授权本身:即便这几项都满足,
+            # 真正开 L3 仍须过 admission.evaluate_l3_admission 的完整门禁
+            # (≥8 周试点、连续达标、业务对照基线、双人批准等),
+            # 这些只能来自真实试点数据。开发完成 ≠ 指标达标。
+            "l3_readiness_preview": (shadow_gate["met"] and l2_gate["met"]
+                                     and quality_gates_met and safety_clean),
+            "authoritative_gate": "admission.evaluate_l3_admission(需真实试点数据)",
         },
     }

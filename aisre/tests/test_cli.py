@@ -89,6 +89,20 @@ class TestValidatePlanCommand(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertNotEqual(out["violations"], [])
 
+    def test_malformed_success_criteria_reported_not_crash(self):
+        # 契约层响亮失败:非法 success_criteria 报告为违规、退出 1,不崩溃
+        plan_dict = make_scale_out().to_dict()
+        plan_dict["success_criteria"] = [{"metric": "error_rate", "op": "<",
+                                          "threshold": None}]  # 数值缺阈值
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "plan.json"
+            path.write_text(json.dumps(plan_dict, ensure_ascii=False),
+                            encoding="utf-8")
+            code, out = run_cli("validate-plan", "--file", str(path),
+                                "--now", "2026-07-15T10:12:00Z")
+        self.assertEqual(code, 1)
+        self.assertTrue(any("结构非法" in v for v in out["violations"]))
+
 
 class TestIntakeCommand(unittest.TestCase):
     def test_intake_alertmanager_webhook(self):
@@ -132,6 +146,43 @@ class TestReplayCommand(unittest.TestCase):
         self.assertEqual(out["total_cases"], 1)
         self.assertEqual(out["top3_recall"], 1.0)
         self.assertEqual(out["exact_match_rate"], 1.0)
+
+
+class TestAdmissionCommand(unittest.TestCase):
+    def _run(self, tmp, metrics):
+        path = Path(tmp) / "pilot.json"
+        path.write_text(json.dumps(metrics, ensure_ascii=False),
+                        encoding="utf-8")
+        return run_cli("admission", "--file", str(path))
+
+    def _full_pass(self):
+        return dict(
+            pilot_weeks=8.0, valid_incidents=30, shadow_cases=520,
+            real_l2_executions=55, exact_match_total=500,
+            exact_match_hits=499, weeks_continuous_compliant=8,
+            ai_change_failure_rate=0.03, baseline_change_failure_rate=0.05,
+            policy_bypasses=0, severe_wrong_actions=0,
+            ai_caused_severe_incidents=0, fault_injection_pass_rate=1.0,
+            dual_approved=True)
+
+    def test_full_pass_exit_zero(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            code, out = self._run(tmp, self._full_pass())
+        self.assertEqual(code, 0)
+        self.assertTrue(out["l3_eligible"])
+
+    def test_development_complete_exit_one(self):
+        # 开发完成、回放刷满 Shadow,但没试点数据 → 退出 1,列出缺口
+        m = self._full_pass()
+        m.update(pilot_weeks=0.0, valid_incidents=0, real_l2_executions=0,
+                 weeks_continuous_compliant=0, ai_change_failure_rate=None,
+                 dual_approved=False)
+        with tempfile.TemporaryDirectory() as tmp:
+            code, out = self._run(tmp, m)
+        self.assertEqual(code, 1)
+        self.assertFalse(out["l3_eligible"])
+        self.assertIn("pilot_duration", out["blocking"])
+        self.assertIn("dual_approval", out["blocking"])
 
 
 class TestValidateEnrichmentCommand(unittest.TestCase):

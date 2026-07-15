@@ -59,14 +59,22 @@
 
 > 开发完成 = 能力具备;业务指标仍须经 ≥8 周 L2 生产试点用真实数据验证,不预先宣称达标。
 
+**开发完成后的加固**
+
+| 加固 | 模块 | 要点 |
+|---|---|---|
+| 成功条件结构化 | `aisre/actions.py` | `SuccessCriterion {metric,op,threshold}` 契约层归一;非法格式构造时响亮报错,不再静默变成 Guardian 永久超时回滚;Guardian 去掉自有正则 |
+| L3 准入门禁 | `aisre/admission.py` | 把"开发完成 ≠ 指标达标"变成代码强制:≥8 周试点/连续达标/业务对照基线/双人批准等 11 道门,只能靠真实试点数据放行;board 的四项只是"就绪预览"不冒充授权 |
+
 ## 运行
 
 ```bash
-python3 -m unittest discover        # 全部测试(213 个)
+python3 -m unittest discover        # 全部测试(243 个)
 python3 demo/run_demo.py            # 12 步全链路(接入→丰富→工作台→网关执行→Guardian→Shadow→看板)
 python3 -m aisre.cli scenarios      # 列出场景定义
 python3 -m aisre.cli intake --file webhook.json --format alertmanager
 python3 -m aisre.cli replay --cases demo/data/replay_cases.jsonl
+python3 -m aisre.cli admission --file pilot_metrics.json   # L3 准入门禁,达标才退出 0
 python3 -m aisre.cli baseline --incidents demo/data/incidents.jsonl \
     --changes demo/data/changes.jsonl --as-of 2026-07-15T00:00:00Z
 python3 -m aisre.cli validate-plan --file plan.json --now 2026-07-15T10:12:00Z \
@@ -102,7 +110,8 @@ aisre/
   gateway.py         执行网关(12 环检查链 + 红色按钮 + 审计)
   guardian.py        执行后守护(观测序列 + 自动回滚 + 熔断)
   shadow.py          生产 Shadow(只生成计划记 ledger,不执行)
-  cli.py             六个子命令(输出 JSON,违规时退出码 1,格式错误退出码 2)
+  admission.py       L3 准入门禁(11 道门,只有真实试点数据能放行)
+  cli.py             七个子命令(输出 JSON,违规时退出码 1,格式错误退出码 2)
 tests/               unittest 套件(TDD,逐模块 red-green)
 demo/                端到端演示(12 步全链路)+ 样例数据
 ```

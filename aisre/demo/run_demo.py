@@ -10,6 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from aisre.actions import ActionPlan, approve, is_approval_valid, validate_action_plan
+from aisre.admission import PilotMetrics, evaluate_l3_admission
 from aisre.baseline import ChangeRecord, IncidentRecord, compute_baseline
 from aisre.board import build_board
 from aisre.catalog import ServiceCatalog, ServiceEntry
@@ -273,7 +274,27 @@ def main():
         real_l2_executions=1,
         gold_labels=gold_store.count(),
         policy_bypasses=0, severe_wrong_actions=0)
-    print(json.dumps(board, ensure_ascii=False, indent=2))
+    print(f"就绪预览 l3_readiness_preview="
+          f"{board['admission']['l3_readiness_preview']},"
+          f"授权门禁={board['admission']['authoritative_gate']}")
+
+    # 13. L3 准入门禁:开发完成 ≠ 指标达标
+    step("13. L3 准入门禁(F12,开发完成 != 指标达标)")
+    dev_complete = PilotMetrics(
+        pilot_weeks=0.0, valid_incidents=0,
+        shadow_cases=shadow.count() + ledger.count(),   # 回放能刷,但没试点
+        real_l2_executions=1, exact_match_total=eval_report.total_cases,
+        exact_match_hits=eval_report.exact_matches,
+        weeks_continuous_compliant=0,
+        ai_change_failure_rate=None,        # 没有真实变更数据
+        baseline_change_failure_rate=0.05,
+        policy_bypasses=0, severe_wrong_actions=0,
+        ai_caused_severe_incidents=0, fault_injection_pass_rate=1.0,
+        dual_approved=False)
+    decision = evaluate_l3_admission(dev_complete)
+    print(f"当前(开发完成)L3 授权: l3_eligible={decision.l3_eligible}")
+    print(f"仍缺 {len(decision.blocking)} 道门(只能靠真实试点补齐): "
+          f"{decision.blocking}")
 
 
 def _load(name):
