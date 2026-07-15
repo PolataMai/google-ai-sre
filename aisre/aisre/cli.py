@@ -17,7 +17,9 @@ from pathlib import Path
 
 from aisre.actions import ActionPlan, validate_action_plan
 from aisre.baseline import ChangeRecord, IncidentRecord, compute_baseline
+from aisre.evaluation import evaluate_replays
 from aisre.intake import IntakeService, MalformedPayload, UnknownFormat
+from aisre.replay import ReplayCase, replay_case
 from aisre.scenarios import get_scenario, list_scenarios
 from aisre.schemas import Enrichment, evidence_coverage, validate_enrichment
 
@@ -88,6 +90,13 @@ def _cmd_intake(args) -> int:
     return 0
 
 
+def _cmd_replay(args) -> int:
+    cases = [ReplayCase.from_dict(d) for d in _read_jsonl(args.cases)]
+    report = evaluate_replays([replay_case(c) for c in cases])
+    _print(report.to_dict())
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="aisre")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -114,6 +123,9 @@ def main(argv=None) -> int:
     p_intake.add_argument("--format", required=True,
                           help="alertmanager / pagerduty / custom")
 
+    p_replay = sub.add_parser("replay", help="回放历史案例并输出评测报告")
+    p_replay.add_argument("--cases", required=True, help="ReplayCase JSONL 文件")
+
     args = parser.parse_args(argv)
     handlers = {
         "scenarios": _cmd_scenarios,
@@ -121,6 +133,7 @@ def main(argv=None) -> int:
         "validate-plan": _cmd_validate_plan,
         "validate-enrichment": _cmd_validate_enrichment,
         "intake": _cmd_intake,
+        "replay": _cmd_replay,
     }
     return handlers[args.command](args)
 

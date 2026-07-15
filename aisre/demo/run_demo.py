@@ -11,12 +11,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from aisre.actions import ActionPlan, approve, is_approval_valid, validate_action_plan
 from aisre.baseline import ChangeRecord, IncidentRecord, compute_baseline
+from aisre.board import build_board
 from aisre.catalog import ServiceCatalog, ServiceEntry
 from aisre.connectors import default_connectors
 from aisre.enrichment import (enrichment_latency_seconds, refresh_missing,
                               run_enrichment)
+from aisre.evaluation import evaluate_replays
 from aisre.evidence_store import EvidenceStore
+from aisre.gold import GoldStore, accept, suggest_from_execution
 from aisre.intake import IntakeService
+from aisre.replay import ReplayCase, ShadowLog, replay_case
 from aisre.scenarios import get_scenario
 from aisre.schemas import evidence_coverage
 from aisre.workbench import build_workbench, render_markdown
@@ -85,9 +89,10 @@ def main():
         incident_id=result.incident_id, alert=result.alert,
         time_range=WINDOW, connectors=default_connectors(**clients),
         store=store, published_at="2026-07-15T10:09:20Z")
+    first_publish_latency = enrichment_latency_seconds(run.enrichment)
     print(f"部分发布: partial={run.partial},缺失源: {run.missing_sources},"
           f"守门违规: {run.violations or '无'}")
-    print(f"告警→发布延迟: {enrichment_latency_seconds(run.enrichment):.0f}s,"
+    print(f"告警→首次发布延迟: {first_publish_latency:.0f}s,"
           f"完整性校验: 被篡改 {store.verify(result.incident_id) or '无'}")
 
     # 追加:logs 恢复后补齐缺失源,重算事实与 Top-3
@@ -138,7 +143,44 @@ def main():
     changes = [ChangeRecord(**d) for d in _load("changes.jsonl")]
     report = compute_baseline(incidents=incidents, changes=changes,
                               as_of="2026-07-15T00:00:00Z")
-    print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))
+    mttm = report.to_dict()["by_service_scenario"]
+    print(json.dumps(mttm, ensure_ascii=False, indent=2))
+
+    # 8. 回放评测 + Gold 回流 + Shadow 日志
+    step("8. 时间切片回放与评测(F11)")
+    cases = [ReplayCase.from_dict(d) for d in _load("replay_cases.jsonl")]
+    shadow = ShadowLog(tmp)
+    results = []
+    for case in cases:
+        r = replay_case(case)
+        shadow.record(r, at="2026-07-15T12:00:00Z")
+        results.append(r)
+    eval_report = evaluate_replays(results)
+    print(f"回放 {eval_report.total_cases} 例: "
+          f"Top-3 召回 {eval_report.top3_recall:.0%},"
+          f"Top-1 准确 {eval_report.top1_accuracy:.0%},"
+          f"L2 精确匹配 {eval_report.exact_match_rate:.0%},"
+          f"Shadow 日志 {shadow.count()} 条")
+
+    # Gold 回流:关单时从实际执行动作预填,值班人一键接受
+    gold_store = GoldStore(tmp)
+    suggestion = suggest_from_execution(
+        incident_id=result.incident_id, executed_plan=plan,
+        top_cause=enr.hypotheses[0].cause_code)
+    gold_store.add(accept(suggestion, by="alice", at="2026-07-15T12:30:00Z"))
+    print(f"Gold 回流: {gold_store.count()} 条标注")
+
+    # 9. 指标看板:全部从记录计算
+    step("9. 指标看板(F13)")
+    board = build_board(
+        enrichment_latencies=[first_publish_latency],   # p95 以首次发布为准,追加不重置
+        evidence_coverages=[evidence_coverage(enr)],
+        eval_report=eval_report,
+        shadow_cases=shadow.count(),
+        real_l2_executions=0,
+        gold_labels=gold_store.count(),
+        policy_bypasses=0, severe_wrong_actions=0)
+    print(json.dumps(board, ensure_ascii=False, indent=2))
 
 
 def _load(name):

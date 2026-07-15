@@ -120,6 +120,20 @@ class TestIntakeCommand(unittest.TestCase):
         self.assertEqual(code, 2)
 
 
+class TestReplayCommand(unittest.TestCase):
+    def test_replay_cases_and_report(self):
+        from tests.test_replay import CASE
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cases.jsonl"
+            path.write_text(json.dumps(CASE, ensure_ascii=False) + "\n",
+                            encoding="utf-8")
+            code, out = run_cli("replay", "--cases", str(path))
+        self.assertEqual(code, 0)
+        self.assertEqual(out["total_cases"], 1)
+        self.assertEqual(out["top3_recall"], 1.0)
+        self.assertEqual(out["exact_match_rate"], 1.0)
+
+
 class TestValidateEnrichmentCommand(unittest.TestCase):
     def test_enrichment_with_uncovered_fact_exit_one(self):
         enr = {"incident_id": "inc-x",

@@ -1,7 +1,7 @@
-# aisre —— AI SRE MVP(第 1–6 周交付)
+# aisre —— AI SRE MVP(第 1–8 周交付)
 
 依据 [ai-sre/google-ai-sre-能力与实现方案.md](../ai-sre/google-ai-sre-能力与实现方案.md)
-(Google AI SRE 文章的落地方案)完成 12 周计划中前两个周期的交付:
+(Google AI SRE 文章的落地方案)完成 12 周计划中前四个周期的交付:
 
 **第 1–2 周(数据契约层)**
 
@@ -30,13 +30,24 @@
 | 告警丰富编排 | `aisre/enrichment.py` | 采集→入库→事实→Top-3→守门→发布;缺失源先发布后追加(refresh);分段计时;p95 口径=告警到发布墙钟 |
 | 事故工作台 F05 | `aisre/workbench.py` | 单一视图:时间线对齐/数据源状态/带链接事实/Top-3/建议动作;Markdown 渲染可直接贴事故平台 |
 
+**第 7–8 周(评测与准入层)**
+
+| 交付 | 模块 | 要点 |
+|---|---|---|
+| Gold 数据流程 | `aisre/gold.py` | 关单时从实际执行动作预填建议;接受/修改/拒绝;追加式 JSONL,按事故取最新 |
+| Shadow 计划器 | `aisre/planner.py` | Top-1 置信 ≥0.8 才生成;参数只取自事实(缺参数拒绝不猜);产出必过契约校验 |
+| 时间切片回放 F11 | `aisre/replay.py` | 录制快照重放同一套线上代码路径;缺源重放为当时不可用;ShadowLog 计数服务 500 例门槛 |
+| 评测 | `aisre/evaluation.py` | Top-3 召回率(≥85%)/Top-1 准确率/L2 精确匹配率(≥95%,全等才算);无 Gold 不进分母 |
+| 指标看板 F13 | `aisre/board.py` | 业务/Agent/安全/准入四区全部从记录计算;任一安全事件否决 L3 资格 |
+
 ## 运行
 
 ```bash
-python3 -m unittest discover        # 全部测试(125 个)
+python3 -m unittest discover        # 全部测试(158 个)
 python3 demo/run_demo.py            # 端到端演示(接入→丰富→工作台→动作→审批→基线)
 python3 -m aisre.cli scenarios      # 列出场景定义
 python3 -m aisre.cli intake --file webhook.json --format alertmanager
+python3 -m aisre.cli replay --cases demo/data/replay_cases.jsonl
 python3 -m aisre.cli baseline --incidents demo/data/incidents.jsonl \
     --changes demo/data/changes.jsonl --as-of 2026-07-15T00:00:00Z
 python3 -m aisre.cli validate-plan --file plan.json --now 2026-07-15T10:12:00Z \
@@ -62,12 +73,18 @@ aisre/
   hypotheses.py      Top-3 假设引擎(确定性打分 + 反证)
   enrichment.py      丰富编排(部分发布/追加/分段计时/p95)
   workbench.py       事故工作台(结构化视图 + Markdown 渲染)
-  cli.py             五个子命令(输出 JSON,违规时退出码 1,格式错误退出码 2)
+  gold.py            Gold 标注流程(预填建议 + 追加式存储)
+  planner.py         Shadow 计划器(只生成不执行)
+  replay.py          时间切片回放 + ShadowLog
+  evaluation.py      Top-3 召回 / Top-1 准确 / L2 精确匹配
+  board.py           指标看板(四区 + L3 准入门槛)
+  cli.py             六个子命令(输出 JSON,违规时退出码 1,格式错误退出码 2)
 tests/               unittest 套件(TDD,逐模块 red-green)
 demo/                端到端演示 + 样例数据
 ```
 
-## 后续(第 7–8 周)
+## 后续(第 9–10 周)
 
-Gold 数据流程、时间切片回放、指标看板、Shadow 模式——丰富链路的每次运行
-(EnrichmentRun)已可序列化重算,是回放与 Top-3 召回率评测的输入。
+独立执行网关(actuation-gateway)、OPA 策略、Agent 身份、审批流、两个 L2
+动作的真实执行——计划器产出的 ActionPlan 与审批哈希绑定机制已就绪,
+网关是它们之上的强制执行点。
