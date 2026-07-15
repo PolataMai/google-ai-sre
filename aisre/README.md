@@ -1,7 +1,7 @@
-# aisre —— AI SRE MVP(第 1–10 周交付)
+# aisre —— AI SRE MVP(第 1–12 周交付,开发完成)
 
 依据 [ai-sre/google-ai-sre-能力与实现方案.md](../ai-sre/google-ai-sre-能力与实现方案.md)
-(Google AI SRE 文章的落地方案)完成 12 周计划中前五个周期的交付:
+(Google AI SRE 文章的落地方案)完成 12 周计划全部六个周期的交付:
 
 **第 1–2 周(数据契约层)**
 
@@ -49,11 +49,21 @@
 | 执行网关 F08 | `aisre/gateway.py` | 12 环检查链;提交者必须 agent、审批人必须 human;幂等重放不二次执行;红色按钮;全程审计;fail closed |
 | 晋降级状态机 | `aisre/catalog.py` | SHADOW→L2→L3 逐级晋升不可跳级;任意态可挂起;降级后禁直恢复 L3 |
 
+**第 11–12 周(守护与生产 Shadow 层)**
+
+| 交付 | 模块 | 要点 |
+|---|---|---|
+| Guardian F09 | `aisre/guardian.py` | 执行后按观测序列守护 SLI;成功放行,恶化/超时自动回滚补偿动作 + 熔断 scope;fail closed(拿不到 SLI 也止血) |
+| 故障注入演练 | `tests/test_fault_injection.py` | 两个 L2 动作注入恶化均回滚(通过率 100%);回滚熔断后网关在 autonomy 环拒绝后续,端到端闭环 |
+| 生产 Shadow F11 | `aisre/shadow.py` | 对真实告警只生成计划记入 ledger、绝不执行("不执行"结构性保证:不 import gateway);累积案例服务 500 例准入门槛 |
+
+> 开发完成 = 能力具备;业务指标仍须经 ≥8 周 L2 生产试点用真实数据验证,不预先宣称达标。
+
 ## 运行
 
 ```bash
-python3 -m unittest discover        # 全部测试(194 个)
-python3 demo/run_demo.py            # 端到端演示(接入→丰富→工作台→动作→审批→基线)
+python3 -m unittest discover        # 全部测试(213 个)
+python3 demo/run_demo.py            # 12 步全链路(接入→丰富→工作台→网关执行→Guardian→Shadow→看板)
 python3 -m aisre.cli scenarios      # 列出场景定义
 python3 -m aisre.cli intake --file webhook.json --format alertmanager
 python3 -m aisre.cli replay --cases demo/data/replay_cases.jsonl
@@ -90,12 +100,16 @@ aisre/
   identity.py        Agent/Human 主体令牌(HMAC 短时签名)
   policy.py          策略引擎(OPA 替身,默认拒绝)
   gateway.py         执行网关(12 环检查链 + 红色按钮 + 审计)
+  guardian.py        执行后守护(观测序列 + 自动回滚 + 熔断)
+  shadow.py          生产 Shadow(只生成计划记 ledger,不执行)
   cli.py             六个子命令(输出 JSON,违规时退出码 1,格式错误退出码 2)
 tests/               unittest 套件(TDD,逐模块 red-green)
-demo/                端到端演示 + 样例数据
+demo/                端到端演示(12 步全链路)+ 样例数据
 ```
 
-## 后续(第 11–12 周)
+## 后续(开发完成之后)
 
-Guardian(执行后 SLI 守护与自动回滚)、故障注入演练、生产 Shadow——
-网关已维护 LRO 状态(mark_completed),Guardian 是其执行后延伸。
+MVP 开发已收口,进入 ≥8 周 L2 生产试点:累积真实执行、连续 8 周核心指标
+达标、故障注入与回滚演练通过率 100% 后,才为单个"服务×场景×动作"开 L3。
+业务指标(MTTM、变更失败率)必须用真实试点数据对照 90 天基线验证,
+不因开发完成而预先宣称达标。

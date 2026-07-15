@@ -20,12 +20,14 @@ from aisre.evaluation import evaluate_replays
 from aisre.evidence_store import EvidenceStore
 from aisre.gateway import ExecutionGateway
 from aisre.gold import GoldStore, accept, suggest_from_execution
+from aisre.guardian import guard
 from aisre.identity import IdentityAuthority
 from aisre.policy import default_policy_set
 from aisre.intake import IntakeService
 from aisre.replay import ReplayCase, ShadowLog, replay_case
 from aisre.scenarios import get_scenario
 from aisre.schemas import evidence_coverage
+from aisre.shadow import ShadowLedger, shadow_evaluate
 from aisre.workbench import build_workbench, render_markdown
 
 NOW = "2026-07-15T10:12:00Z"
@@ -217,14 +219,58 @@ def main():
         encoding="utf-8").splitlines()
     print(f"审计记录: {len(audit_lines)} 条(含 kill/resume 与全部尝试)")
 
-    # 10. 指标看板:全部从记录计算
-    step("10. 指标看板(F13)")
+    # 10. Guardian:执行后守护 + 故障注入自动回滚 + 熔断
+    step("10. Guardian 执行后守护(F09)")
+
+    class GuardianExecutorStub:
+        def __init__(self):
+            self.rollbacks = []
+
+        def rollback(self, p):
+            self.rollbacks.append(p.action_id)
+            return {"status": "compensated", "compensation": p.rollback}
+
+    gex = GuardianExecutorStub()
+    healthy = guard(plan, [{"sli_recovered_5m": True,
+                            "no_new_error_signature": True}], gex)
+    print(f"健康观测: outcome={healthy.outcome}"
+          f"(消费 {healthy.observations_consumed} 个观测,无回滚)")
+    faulted = guard(plan, [{"regression_signals": ["crashloop"]}], gex,
+                    on_rollback=lambda: cat.set_level(key,
+                                                      AutonomyLevel.SUSPENDED))
+    print(f"故障注入: outcome={faulted.outcome},补偿动作={gex.rollbacks[-1]},"
+          f"scope 熔断为 {cat.autonomy_level(key).value}")
+    followup = ActionPlan.from_dict({**plan.to_dict(),
+                                     "action_id": "act-after",
+                                     "idempotency_key": "inc-001-rollback-after"})
+    after = gateway.execute(
+        plan=followup, cause_code="RECENT_RELEASE_REGRESSION",
+        agent_token=agent_token, now=NOW,
+        approval=approve(followup, approver="alice", approved_at=NOW),
+        approver_token=alice_token)
+    print(f"熔断后网关拒绝后续: executed={after.executed},stage={after.stage}")
+
+    # 11. 生产 Shadow:同一 run 只生成计划记入 ledger,绝不执行
+    step("11. 生产 Shadow(F11)")
+    ledger = ShadowLedger(tmp)
+    shadow_rec = shadow_evaluate(
+        run, target={"cluster": "prod-cn-east", "namespace": "payment",
+                     "workload": "payment-api"},
+        expires_at="2026-07-15T10:20:00Z")
+    ledger.append(shadow_rec)
+    plan_desc = (shadow_rec.plan["action_type"] if shadow_rec.plan
+                 else shadow_rec.plan_refusal)
+    print(f"Shadow 记录: mode={shadow_rec.mode},计划={plan_desc},"
+          f"ledger 累积 {ledger.count()} 例(服务 500 例准入门槛)")
+
+    # 12. 指标看板:全部从记录计算
+    step("12. 指标看板(F13)")
     board = build_board(
         enrichment_latencies=[first_publish_latency],   # p95 以首次发布为准,追加不重置
         evidence_coverages=[evidence_coverage(enr)],
         eval_report=eval_report,
-        shadow_cases=shadow.count(),
-        real_l2_executions=0,
+        shadow_cases=shadow.count() + ledger.count(),
+        real_l2_executions=1,
         gold_labels=gold_store.count(),
         policy_bypasses=0, severe_wrong_actions=0)
     print(json.dumps(board, ensure_ascii=False, indent=2))

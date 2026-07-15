@@ -135,13 +135,34 @@ kill/resume 本身也进审计。限流即 Agent 级熔断(每服务每小时上
 原有链路不依赖 AI SRE);审批人令牌必须是 human 主体且与审批记录同名。
 Agent 给自己审批在身份层就不可能表达,不依赖流程自觉。
 
+### 17. Guardian 用观测序列裁决,fail closed 到止血(第 11–12 周)
+
+guardian.py 消费一串观测快照逐个裁决,优先级:恶化信号立即回滚 > 成功条件
+全达成放行 > 窗口内始终无法确认成功则保守回滚。第三条是关键的 fail closed:
+拿不到 SLI(空观测 / 指标缺失)不当作"没事",而是止血——与网关"依赖不可用
+即拒绝"同源。回滚执行补偿动作(plan.rollback),并经 on_rollback 把该 scope
+熔断为 SUSPENDED;由 catalog 状态机保证熔断后不能自动恢复 L3,只能回 SHADOW/L2
+重新爬。success_criteria 的求值(evaluate_criterion)是我在下游补的正则解析
+——更严谨该在 actions.py 契约层就把条件设计成结构化的 {metric,op,threshold},
+这是一处明确的技术债:非常规格式会被解析成"未决"而永远触发超时回滚。
+
+### 18. Shadow 的"不执行"是结构性的,不靠自觉
+
+shadow.py 只调 planner.draft_plan 生成计划、记 ledger,不 import gateway
+(test_shadow 扫 import 行断言这一点)——与 L2/L3 的唯一区别就是是否提交执行。
+Shadow 与真执行共用同一个 EnrichmentRun + draft_plan,保证累积的案例与将来
+真执行的计划一致,500 例门槛才有评测意义。故障注入演练(test_fault_injection)
+是组合已各自 TDD 建成的 Guardian + gateway + catalog 的集成断言,不重复单元
+覆盖,只守"恶化即回滚 + 熔断 + 拒绝后续"的跨模块闭环。
+
 ## 测试
 
-194 个 unittest,TDD 逐模块 red-green:
+213 个 unittest,TDD 逐模块 red-green:
 scenarios(7) / schemas(14) / actions(19) / catalog(15) / baseline(8) /
 intake(10) / connectors(9) / evidence_store(8) / e2e-intake-flow(1) /
 facts(8) / hypotheses(8) / enrichment(7) / workbench(8) /
 gold(8) / planner(6) / replay(5) / evaluation(6) / board(7) /
-identity(6) / policy(6) / gateway(20,含 catalog 状态机 4) / cli(8)。
+identity(6) / policy(6) / gateway(20,含 catalog 状态机 4) /
+guardian(13) / shadow(4) / fault-injection(2) / cli(8)。
 CLI 测试直接调 `cli.main(argv)` 断言退出码与 JSON 输出,不起子进程;
 并行/超时行为用可控的假 client(sleep/抛错)验证,不依赖真实数据源。
