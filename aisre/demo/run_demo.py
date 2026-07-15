@@ -18,7 +18,10 @@ from aisre.enrichment import (enrichment_latency_seconds, refresh_missing,
                               run_enrichment)
 from aisre.evaluation import evaluate_replays
 from aisre.evidence_store import EvidenceStore
+from aisre.gateway import ExecutionGateway
 from aisre.gold import GoldStore, accept, suggest_from_execution
+from aisre.identity import IdentityAuthority
+from aisre.policy import default_policy_set
 from aisre.intake import IntakeService
 from aisre.replay import ReplayCase, ShadowLog, replay_case
 from aisre.scenarios import get_scenario
@@ -170,8 +173,52 @@ def main():
     gold_store.add(accept(suggestion, by="alice", at="2026-07-15T12:30:00Z"))
     print(f"Gold 回流: {gold_store.count()} 条标注")
 
-    # 9. 指标看板:全部从记录计算
-    step("9. 指标看板(F13)")
+    # 9. 安全执行网关:L2 审批执行 -> 幂等重放 -> 红色按钮
+    step("9. 安全执行网关(F08)")
+    from aisre.catalog import AutonomyLevel
+
+    class K8sExecutorStub:
+        def dry_run(self, p):
+            return True, "server-side dry-run ok"
+
+        def execute(self, p):
+            return {"status": "applied", "action_id": p.action_id}
+
+    cat.set_level(key, AutonomyLevel.L2_APPROVAL)   # SHADOW -> L2
+    authority = IdentityAuthority(secret="demo-secret")
+    gateway = ExecutionGateway(
+        catalog=cat, policies=default_policy_set(allowed_namespaces=("payment",)),
+        authority=authority,
+        executors={"rollback_release": K8sExecutorStub(),
+                   "scale_out": K8sExecutorStub()},
+        incident_is_open=lambda iid: True, audit_dir=tmp)
+    agent_token = authority.issue("ai-sre-orchestrator", "agent",
+                                  issued_at=NOW, ttl_seconds=3600)
+    alice_token = authority.issue("alice", "human", issued_at=NOW,
+                                  ttl_seconds=3600)
+    plan.parameters["rollback_to_version"] = "v41"   # 还原演示用参数
+    appr2 = approve(plan, approver="alice", approved_at=NOW)
+    decision = gateway.execute(plan=plan, cause_code="RECENT_RELEASE_REGRESSION",
+                               agent_token=agent_token, now=NOW,
+                               approval=appr2, approver_token=alice_token)
+    print(f"L2 审批执行: executed={decision.executed},"
+          f"检查链 {len(decision.checks)} 环: {decision.checks[:4]}…")
+    replay2 = gateway.execute(plan=plan, cause_code="RECENT_RELEASE_REGRESSION",
+                              agent_token=agent_token, now=NOW,
+                              approval=appr2, approver_token=alice_token)
+    print(f"幂等重放: idempotent_replay={replay2.idempotent_replay}")
+    gateway.kill(by="alice", at=NOW)
+    blocked = gateway.execute(plan=plan, cause_code="RECENT_RELEASE_REGRESSION",
+                              agent_token=agent_token, now=NOW,
+                              approval=appr2, approver_token=alice_token)
+    print(f"红色按钮后: stage={blocked.stage},reason={blocked.reason}")
+    gateway.resume(by="alice", at=NOW)
+    audit_lines = (Path(tmp) / "gateway_audit.jsonl").read_text(
+        encoding="utf-8").splitlines()
+    print(f"审计记录: {len(audit_lines)} 条(含 kill/resume 与全部尝试)")
+
+    # 10. 指标看板:全部从记录计算
+    step("10. 指标看板(F13)")
     board = build_board(
         enrichment_latencies=[first_publish_latency],   # p95 以首次发布为准,追加不重置
         evidence_coverages=[evidence_coverage(enr)],

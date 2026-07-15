@@ -82,3 +82,25 @@ class ServiceCatalog:
     def autonomy_level(self, key: str) -> Optional[AutonomyLevel]:
         """未登记的 scope 返回 None = 无任何自治权限（默认拒绝）。"""
         return self._scopes.get(key)
+
+    # 合法迁移:逐级晋升;任意态可挂起;挂起/降级后不可直回 L3
+    _TRANSITIONS = {
+        AutonomyLevel.SHADOW: {AutonomyLevel.L2_APPROVAL,
+                               AutonomyLevel.SUSPENDED},
+        AutonomyLevel.L2_APPROVAL: {AutonomyLevel.L3_AUTO,
+                                    AutonomyLevel.SHADOW,
+                                    AutonomyLevel.SUSPENDED},
+        AutonomyLevel.L3_AUTO: {AutonomyLevel.L2_APPROVAL,
+                                AutonomyLevel.SHADOW,
+                                AutonomyLevel.SUSPENDED},
+        AutonomyLevel.SUSPENDED: {AutonomyLevel.SHADOW,
+                                  AutonomyLevel.L2_APPROVAL},
+    }
+
+    def set_level(self, key: str, to_level: AutonomyLevel) -> None:
+        current = self._scopes[key]   # 未登记 scope 直接 KeyError
+        if to_level not in self._TRANSITIONS[current]:
+            raise ValueError(
+                f"非法迁移 {current.value} -> {to_level.value}"
+                f"(合法: {sorted(l.value for l in self._TRANSITIONS[current])})")
+        self._scopes[key] = to_level

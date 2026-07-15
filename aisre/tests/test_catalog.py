@@ -85,3 +85,40 @@ class TestAutonomyScopes(unittest.TestCase):
 
     def test_unknown_scope_defaults_to_no_autonomy(self):
         self.assertIsNone(self.cat.autonomy_level("nonexistent+scope+key+x"))
+
+
+class TestAutonomyTransitions(unittest.TestCase):
+    """状态机:SHADOW → L2_APPROVAL → L3_AUTO;任意态可 SUSPENDED;不可跳级。"""
+
+    def setUp(self):
+        self.cat = ServiceCatalog()
+        self.cat.register(make_entry())
+        self.key = self.cat.grant_scope("payment-api", "CAPACITY_SATURATION",
+                                        "scale_out")
+
+    def test_promote_step_by_step(self):
+        self.cat.set_level(self.key, AutonomyLevel.L2_APPROVAL)
+        self.assertEqual(self.cat.autonomy_level(self.key),
+                         AutonomyLevel.L2_APPROVAL)
+        self.cat.set_level(self.key, AutonomyLevel.L3_AUTO)
+        self.assertEqual(self.cat.autonomy_level(self.key),
+                         AutonomyLevel.L3_AUTO)
+
+    def test_skip_level_promotion_rejected(self):
+        with self.assertRaises(ValueError):
+            self.cat.set_level(self.key, AutonomyLevel.L3_AUTO)  # SHADOW 直跳 L3
+
+    def test_suspend_from_any_level_and_no_direct_l3_recovery(self):
+        self.cat.set_level(self.key, AutonomyLevel.L2_APPROVAL)
+        self.cat.set_level(self.key, AutonomyLevel.SUSPENDED)
+        self.assertEqual(self.cat.autonomy_level(self.key),
+                         AutonomyLevel.SUSPENDED)
+        with self.assertRaises(ValueError):
+            self.cat.set_level(self.key, AutonomyLevel.L3_AUTO)  # 降级后禁直恢复 L3
+        self.cat.set_level(self.key, AutonomyLevel.SHADOW)       # 只能回 SHADOW/L2
+        self.assertEqual(self.cat.autonomy_level(self.key),
+                         AutonomyLevel.SHADOW)
+
+    def test_unknown_scope_cannot_set_level(self):
+        with self.assertRaises(KeyError):
+            self.cat.set_level("ghost+scope+key+x", AutonomyLevel.L2_APPROVAL)

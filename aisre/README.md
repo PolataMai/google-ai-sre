@@ -1,7 +1,7 @@
-# aisre —— AI SRE MVP(第 1–8 周交付)
+# aisre —— AI SRE MVP(第 1–10 周交付)
 
 依据 [ai-sre/google-ai-sre-能力与实现方案.md](../ai-sre/google-ai-sre-能力与实现方案.md)
-(Google AI SRE 文章的落地方案)完成 12 周计划中前四个周期的交付:
+(Google AI SRE 文章的落地方案)完成 12 周计划中前五个周期的交付:
 
 **第 1–2 周(数据契约层)**
 
@@ -40,10 +40,19 @@
 | 评测 | `aisre/evaluation.py` | Top-3 召回率(≥85%)/Top-1 准确率/L2 精确匹配率(≥95%,全等才算);无 Gold 不进分母 |
 | 指标看板 F13 | `aisre/board.py` | 业务/Agent/安全/准入四区全部从记录计算;任一安全事件否决 L3 资格 |
 
+**第 9–10 周(执行与安全层)**
+
+| 交付 | 模块 | 要点 |
+|---|---|---|
+| Agent 身份 | `aisre/identity.py` | 短时 HMAC 签名令牌;agent/human 主体机器可区分;过期/篡改/错密钥显式拒绝 |
+| 策略引擎 | `aisre/policy.py` | OPA 语义替身:默认拒绝、数据驱动规则、决策带策略版本;动作目录/命名空间/爆炸半径三条内置 |
+| 执行网关 F08 | `aisre/gateway.py` | 12 环检查链;提交者必须 agent、审批人必须 human;幂等重放不二次执行;红色按钮;全程审计;fail closed |
+| 晋降级状态机 | `aisre/catalog.py` | SHADOW→L2→L3 逐级晋升不可跳级;任意态可挂起;降级后禁直恢复 L3 |
+
 ## 运行
 
 ```bash
-python3 -m unittest discover        # 全部测试(158 个)
+python3 -m unittest discover        # 全部测试(194 个)
 python3 demo/run_demo.py            # 端到端演示(接入→丰富→工作台→动作→审批→基线)
 python3 -m aisre.cli scenarios      # 列出场景定义
 python3 -m aisre.cli intake --file webhook.json --format alertmanager
@@ -78,13 +87,15 @@ aisre/
   replay.py          时间切片回放 + ShadowLog
   evaluation.py      Top-3 召回 / Top-1 准确 / L2 精确匹配
   board.py           指标看板(四区 + L3 准入门槛)
+  identity.py        Agent/Human 主体令牌(HMAC 短时签名)
+  policy.py          策略引擎(OPA 替身,默认拒绝)
+  gateway.py         执行网关(12 环检查链 + 红色按钮 + 审计)
   cli.py             六个子命令(输出 JSON,违规时退出码 1,格式错误退出码 2)
 tests/               unittest 套件(TDD,逐模块 red-green)
 demo/                端到端演示 + 样例数据
 ```
 
-## 后续(第 9–10 周)
+## 后续(第 11–12 周)
 
-独立执行网关(actuation-gateway)、OPA 策略、Agent 身份、审批流、两个 L2
-动作的真实执行——计划器产出的 ActionPlan 与审批哈希绑定机制已就绪,
-网关是它们之上的强制执行点。
+Guardian(执行后 SLI 守护与自动回滚)、故障注入演练、生产 Shadow——
+网关已维护 LRO 状态(mark_completed),Guardian 是其执行后延伸。
