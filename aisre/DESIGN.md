@@ -70,10 +70,34 @@ write-through 落盘;审计口:每条证据存规范化 JSON 的 sha256,`verify`
 比对可发现落盘后被篡改的记录。证据按事故隔离成单文件,回放时按
 `incident_id` 整体装载。
 
+### 8. 规则化推理是 LLM 的确定性替身,不是权宜(第 5–6 周)
+
+facts.py 的六条抽取规则和 hypotheses.py 的常量置信度表,让"同样的证据永远
+得到同样的事实和 Top-3"成立——这是回放评测(Top-3 召回率 ≥85%)可以精确
+重算的前提。后续引入 LLM 时,规则引擎降级为 LLM 输出的交叉校验器和
+fallback,评测口径不变。时序矛盾规则(错误上升早于发布 → 发布事实进
+evidence_against)示范了"反对证据"如何机械化生成。
+
+### 9. 部分发布 + 追加,而不是等齐
+
+run_enrichment 在有缺失源时照常发布(partial=True,缺失明示),
+refresh_missing 只重查缺失源、证据补进同一事故后全量重算事实与假设——
+incident_id 不变,发布时间更新。对应 90 秒预算的"80 秒标缺失、90 秒先发布、
+稍后追加"。p95 口径 = enrichment_published_at - alert_received_at,
+发布时刻由调用方注入(写回事故平台成功的墙钟),模型内部耗时只进
+stage_seconds 供定位超支环节。
+
+### 10. 工作台是纯投影
+
+workbench.py 不产生新信息,只把 EnrichmentRun 投影成单一视图(时间线对齐、
+证据可回跳、建议动作来自 Top-1 场景白名单)。建议动作只是"草案"——
+执行前仍要走动作契约校验、审批、网关(第 9–10 周),工作台不越权。
+
 ## 测试
 
-94 个 unittest,TDD 逐模块 red-green:
+125 个 unittest,TDD 逐模块 red-green:
 scenarios(7) / schemas(14) / actions(19) / catalog(11) / baseline(8) /
-intake(10) / connectors(9) / evidence_store(8) / e2e-intake-flow(1) / cli(7)。
+intake(10) / connectors(9) / evidence_store(8) / e2e-intake-flow(1) /
+facts(8) / hypotheses(8) / enrichment(7) / workbench(8) / cli(7)。
 CLI 测试直接调 `cli.main(argv)` 断言退出码与 JSON 输出,不起子进程;
 并行/超时行为用可控的假 client(sleep/抛错)验证,不依赖真实数据源。

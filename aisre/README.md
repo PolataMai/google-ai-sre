@@ -1,4 +1,4 @@
-# aisre —— AI SRE MVP(第 1–4 周交付)
+# aisre —— AI SRE MVP(第 1–6 周交付)
 
 依据 [ai-sre/google-ai-sre-能力与实现方案.md](../ai-sre/google-ai-sre-能力与实现方案.md)
 (Google AI SRE 文章的落地方案)完成 12 周计划中前两个周期的交付:
@@ -21,11 +21,20 @@
 | 只读连接器 F02 | `aisre/connectors.py` | metrics/logs/trace/release/topology 五源并行;单源失败不阻塞;异常一次受控重试;超时标缺失 |
 | 证据存储 F03 | `aisre/evidence_store.py` | 按事故落盘、追加不可覆盖、sha256 完整性校验、直接吞采集结果 |
 
+**第 5–6 周(丰富与调查层)**
+
+| 交付 | 模块 | 要点 |
+|---|---|---|
+| 事实抽取 | `aisre/facts.py` | 六条规则从证据快照确定性提取事实(阈值为常量,同证据同事实,天生绑定证据 id) |
+| Top-3 假设 F04 | `aisre/hypotheses.py` | 三场景确定性打分;支持/反对证据;时序矛盾(错误早于发布)自动进反证;验证步骤取自场景定义 |
+| 告警丰富编排 | `aisre/enrichment.py` | 采集→入库→事实→Top-3→守门→发布;缺失源先发布后追加(refresh);分段计时;p95 口径=告警到发布墙钟 |
+| 事故工作台 F05 | `aisre/workbench.py` | 单一视图:时间线对齐/数据源状态/带链接事实/Top-3/建议动作;Markdown 渲染可直接贴事故平台 |
+
 ## 运行
 
 ```bash
-python3 -m unittest discover        # 全部测试(94 个)
-python3 demo/run_demo.py            # 端到端演示(接入→采集→证据库→丰富→动作→审批→基线)
+python3 -m unittest discover        # 全部测试(125 个)
+python3 demo/run_demo.py            # 端到端演示(接入→丰富→工作台→动作→审批→基线)
 python3 -m aisre.cli scenarios      # 列出场景定义
 python3 -m aisre.cli intake --file webhook.json --format alertmanager
 python3 -m aisre.cli baseline --incidents demo/data/incidents.jsonl \
@@ -49,12 +58,16 @@ aisre/
   intake.py          Webhook 归一 / IntakeService(幂等去重 + 工作流触发)
   connectors.py      五类只读连接器 / collect_context 并行采集
   evidence_store.py  EvidenceStore(追加式 + sha256 完整性)
+  facts.py           规则化事实抽取(六条规则,阈值常量)
+  hypotheses.py      Top-3 假设引擎(确定性打分 + 反证)
+  enrichment.py      丰富编排(部分发布/追加/分段计时/p95)
+  workbench.py       事故工作台(结构化视图 + Markdown 渲染)
   cli.py             五个子命令(输出 JSON,违规时退出码 1,格式错误退出码 2)
 tests/               unittest 套件(TDD,逐模块 red-green)
 demo/                端到端演示 + 样例数据
 ```
 
-## 后续(第 5–6 周)
+## 后续(第 7–8 周)
 
-告警丰富链路(90 秒预算编排)、Top-3 假设生成、事故工作台、120 秒 p95 优化——
-接入/采集/证据三件套已就绪,丰富链路是它们之上的编排层。
+Gold 数据流程、时间切片回放、指标看板、Shadow 模式——丰富链路的每次运行
+(EnrichmentRun)已可序列化重算,是回放与 Top-3 召回率评测的输入。

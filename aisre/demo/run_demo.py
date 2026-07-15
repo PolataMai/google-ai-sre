@@ -12,11 +12,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from aisre.actions import ActionPlan, approve, is_approval_valid, validate_action_plan
 from aisre.baseline import ChangeRecord, IncidentRecord, compute_baseline
 from aisre.catalog import ServiceCatalog, ServiceEntry
-from aisre.connectors import collect_context, default_connectors
+from aisre.connectors import default_connectors
+from aisre.enrichment import (enrichment_latency_seconds, refresh_missing,
+                              run_enrichment)
 from aisre.evidence_store import EvidenceStore
 from aisre.intake import IntakeService
 from aisre.scenarios import get_scenario
-from aisre.schemas import Enrichment, Fact, Hypothesis, evidence_coverage
+from aisre.schemas import evidence_coverage
+from aisre.workbench import build_workbench, render_markdown
 
 NOW = "2026-07-15T10:12:00Z"
 WINDOW = ("2026-07-15T10:00:00Z", "2026-07-15T10:15:00Z")
@@ -66,9 +69,11 @@ def main():
     print(f"incident: {result.incident_id}(created={result.created}),"
           f"重复投递 created={dup.created}")
 
-    # 3. 并行采集与证据入库:5 类只读连接器,logs 故障不阻塞
-    step("3. 并行采集与证据入库(F02/F03)")
-    connectors = default_connectors(
+    # 3. 告警丰富编排:采集(logs 故障)→ 事实 → Top-3 → 校验 → 部分发布
+    step("3. 告警丰富编排(F02/F03/F04,logs 故障先发布)")
+    tmp = tempfile.mkdtemp(prefix="aisre-evidence-")
+    store = EvidenceStore(tmp)
+    clients = dict(
         metrics=ok_client({"error_rate_before": 0.002, "error_rate_after": 0.081}),
         logs=broken_logs,
         trace=ok_client({"error_spans": 37}),
@@ -76,33 +81,31 @@ def main():
                            "deployed_at": "2026-07-15T10:05:00Z"}),
         topology=ok_client({"upstream": ["gateway"], "downstream": ["order-db"]}),
     )
-    bundle = collect_context("payment-api", WINDOW, connectors)
-    tmp = tempfile.mkdtemp(prefix="aisre-evidence-")
-    store = EvidenceStore(tmp)
-    store.ingest(result.incident_id, bundle)
-    print(f"采集: {len(bundle.evidences)} 条证据入库,缺失源: {bundle.missing_sources}")
-    print(f"完整性校验: 被篡改 {store.verify(result.incident_id) or '无'}")
+    run = run_enrichment(
+        incident_id=result.incident_id, alert=result.alert,
+        time_range=WINDOW, connectors=default_connectors(**clients),
+        store=store, published_at="2026-07-15T10:09:20Z")
+    print(f"部分发布: partial={run.partial},缺失源: {run.missing_sources},"
+          f"守门违规: {run.violations or '无'}")
+    print(f"告警→发布延迟: {enrichment_latency_seconds(run.enrichment):.0f}s,"
+          f"完整性校验: 被篡改 {store.verify(result.incident_id) or '无'}")
 
-    # 4. 告警丰富:用库中证据构建事实与 Top 假设
-    step("4. 告警丰富(事实必须带证据)")
-    stored = store.list(result.incident_id)
-    enr = Enrichment(incident_id=result.incident_id,
-                     alert_received_at=result.alert.starts_at)
-    for ev in stored:
-        enr.add_evidence(ev)
-    metric_ev = next(e for e in stored if e.source == "metrics")
-    release_ev = next(e for e in stored if e.source == "release")
-    enr.add_fact(Fact(
-        fact_id="fact-101",
-        text="错误率在 v42 发布后 5 分钟从 0.2% 升至 8.1%",
-        observed_at="2026-07-15T10:10:00Z",
-        evidence_ids=[metric_ev.evidence_id, release_ev.evidence_id]))
-    enr.add_hypothesis(Hypothesis(
-        rank=1, cause_code="RECENT_RELEASE_REGRESSION",
-        evidence_for=["fact-101"], evidence_against=[],
-        verification_steps=["compare_canary_baseline"], confidence=0.93))
-    print(f"事实 {len(enr.facts)} 条,证据覆盖率 {evidence_coverage(enr):.0%},"
-          f"Top 假设: {enr.hypotheses[0].cause_code}")
+    # 追加:logs 恢复后补齐缺失源,重算事实与 Top-3
+    clients["logs"] = ok_client({"error_lines": 240})
+    run = refresh_missing(run, connectors=default_connectors(**clients),
+                          store=store, published_at="2026-07-15T10:10:30Z")
+    enr = run.enrichment
+    print(f"追加后: 缺失源 {run.missing_sources or '无'},"
+          f"事实 {len(enr.facts)} 条,证据覆盖率 {evidence_coverage(enr):.0%},"
+          f"Top-1: {enr.hypotheses[0].cause_code}"
+          f"(置信 {enr.hypotheses[0].confidence:.2f})")
+
+    # 4. 事故工作台:单一视图渲染
+    step("4. 事故工作台(F05)")
+    wb = build_workbench(run, alert=result.alert)
+    md = render_markdown(wb)
+    print("\n".join(md.splitlines()[:14]))
+    print(f"…(共 {len(md.splitlines())} 行,含数据源/事实/假设/建议动作)")
 
     # 5. 动作规划:按场景白名单生成 rollback_release 计划并校验
     step("5. 动作契约校验")
