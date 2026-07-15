@@ -1,0 +1,7 @@
+{"incident_id": "inc-901", "service": "payment-api", "cause_code": "RECENT_RELEASE_REGRESSION", "severity": "S2", "started_at": "2026-05-03T14:00:00Z", "mitigated_at": "2026-05-03T14:42:00Z"}
+{"incident_id": "inc-902", "service": "payment-api", "cause_code": "RECENT_RELEASE_REGRESSION", "severity": "S1", "started_at": "2026-05-21T09:10:00Z", "mitigated_at": "2026-05-21T10:25:00Z"}
+{"incident_id": "inc-903", "service": "payment-api", "cause_code": "CAPACITY_SATURATION", "severity": "S2", "started_at": "2026-06-08T19:30:00Z", "mitigated_at": "2026-06-08T19:58:00Z"}
+{"incident_id": "inc-904", "service": "payment-api", "cause_code": "CAPACITY_SATURATION", "severity": "S3", "started_at": "2026-06-30T11:00:00Z", "mitigated_at": "2026-06-30T11:20:00Z"}
+{"incident_id": "inc-905", "service": "payment-api", "cause_code": "SINGLE_INSTANCE_ANOMALY", "severity": "S3", "started_at": "2026-07-05T22:15:00Z", "mitigated_at": "2026-07-05T23:40:00Z"}
+{"incident_id": "inc-906", "service": "payment-api", "cause_code": "RECENT_RELEASE_REGRESSION", "severity": "S2", "started_at": "2026-07-10T16:00:00Z", "mitigated_at": null}
+{"incident_id": "inc-800", "service": "payment-api", "cause_code": "CAPACITY_SATURATION", "severity": "S2", "started_at": "2026-03-01T08:00:00Z", "mitigated_at": "2026-03-01T09:00:00Z"}
