@@ -164,26 +164,46 @@ Shadow 与真执行共用同一个 EnrichmentRun + draft_plan,保证累积的案
 ### 19. L3 准入是代码强制的闸门,不是文档口号(开发完成后加固)
 
 "开发完成 ≠ 指标达标"从 README 的一句话变成 admission.py 的硬门禁:
-`evaluate_l3_admission(PilotMetrics)` 逐条检查方案 §10+§9 的 L3 条件——
+`evaluate_l3_admission(PilotMetrics)` 逐条检查方案 §10+§9 的数据门(9 道)——
 ≥8 周试点且 ≥30 有效事故、≥500 案例、≥50 真实 L2 执行、连续 8 周达标、
-点估计 ≥99.6% 精确匹配、策略绕过/严重错误动作/AI 致严重事故均为 0、
-故障注入 100%、AI 变更失败率不高于人工基线、双人批准——任一不满足即拒绝。
-关键性质(test_admission 的核心用例):开发完成(代码全绿、回放刷满 500
-Shadow 案例)因缺真实执行/试点时长/业务对照/双人批准而 l3_eligible=False。
+≥99.6% 精确匹配(整数交叉相乘,无浮点边界)、策略绕过/严重错误动作/
+AI 致严重事故均为 0、故障注入 100%、AI 变更失败率不高于人工基线——
+任一不满足即拒绝。关键性质(test_admission 的核心用例):开发完成
+(代码全绿、回放刷满 500 Shadow 案例)因缺真实试点数据而拒绝。
 board.py(§9 看板)与 admission.py(§10 闸门)分工:board 展示"你在哪",
 只给 `l3_readiness_preview`(开发侧四项),明确 `authoritative_gate` 指向
 admission;两者不共用 `l3_eligible`,避免"看板达标"被误读成"已授权"。
-晋级程序只计算是否达标,`dual_approved` 这道门保证最终仍需人拍板。
+
+### 20. 闸门必须接在状态机上,审批是行为不是数据(PK 复审加固)
+
+对 #19 的对抗复审发现三处实锤(均有可复现证据):
+(a) `catalog.set_level(key, L3_AUTO)` 不需要任何准入决定就成功——闸门是
+"顾问计算器",没接到授权状态机上,与最初 success_criteria 技术债同类
+(校验存在但没卡在边界);(b) 双人批准是手填 JSON 里的布尔,表达不了
+"谁、几个人、是不是人";(c) 同一逻辑成功条件的 int/float/字符串三种写法
+plan_hash 不同,破坏审批绑定的表示法无关性。
+
+修复:升 L3 只剩一条路——`admission.promote_to_l3`:内部重算门禁
+(不接受外部传入的决定对象,防伪造)→ 校验两个互不相同的已验证人类主体
+(复用 identity,与网关同一套人机分权)→ `catalog._grant_l3`(仅接受
+L2 起点);`set_level` 对 L3_AUTO 一律拒绝,`_TRANSITIONS` 里 L3 不再是
+任何 set_level 可达状态。`dual_approved` 字段删除——方案原文"晋级程序
+只负责计算是否满足条件,最终晋级仍需双人批准"本就是两件事:评估是数据
+计算,批准是身份行为。PilotMetrics 的可派生字段(shadow_cases、
+real_l2_executions、exact_match)由 `derive_pilot_counts` 从 Shadow 台账、
+网关审计、评测报告直接算出,不手填;其余字段是显式人工证词,待试点数据
+管道接管。SuccessCriterion 的 threshold 在构造时归一为 float,三种写法
+哈希一致。
 
 ## 测试
 
-243 个 unittest,TDD 逐模块 red-green:
-scenarios(7) / schemas(14) / actions(19) / success_criteria(14) /
-catalog(15) / baseline(8) / intake(10) / connectors(9) /
+256 个 unittest,TDD 逐模块 red-green:
+scenarios(7) / schemas(14) / actions(19) / success_criteria(16) /
+catalog(17) / baseline(8) / intake(10) / connectors(9) /
 evidence_store(8) / e2e-intake-flow(1) / facts(8) / hypotheses(8) /
 enrichment(7) / workbench(8) / gold(8) / planner(6) / replay(5) /
-evaluation(6) / board(7) / admission(17) /
-identity(6) / policy(6) / gateway(20,含 catalog 状态机 4) /
+evaluation(6) / board(7) / admission(26,含晋级 7 + 派生 2) /
+identity(6) / policy(6) / gateway(20) /
 guardian(9) / shadow(4) / fault-injection(2) / cli(11)。
 CLI 测试直接调 `cli.main(argv)` 断言退出码与 JSON 输出,不起子进程;
 并行/超时行为用可控的假 client(sleep/抛错)验证,不依赖真实数据源。

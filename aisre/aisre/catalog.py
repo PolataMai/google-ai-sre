@@ -83,12 +83,13 @@ class ServiceCatalog:
         """未登记的 scope 返回 None = 无任何自治权限（默认拒绝）。"""
         return self._scopes.get(key)
 
-    # 合法迁移:逐级晋升;任意态可挂起;挂起/降级后不可直回 L3
+    # 合法迁移:逐级晋升;任意态可挂起;挂起/降级后不可直回 L3。
+    # 注意:L3_AUTO 不在任何 set_level 可达集合里——升 L3 只有一条路:
+    # admission.promote_to_l3(重算门禁 + 双人批准)→ _grant_l3。
     _TRANSITIONS = {
         AutonomyLevel.SHADOW: {AutonomyLevel.L2_APPROVAL,
                                AutonomyLevel.SUSPENDED},
-        AutonomyLevel.L2_APPROVAL: {AutonomyLevel.L3_AUTO,
-                                    AutonomyLevel.SHADOW,
+        AutonomyLevel.L2_APPROVAL: {AutonomyLevel.SHADOW,
                                     AutonomyLevel.SUSPENDED},
         AutonomyLevel.L3_AUTO: {AutonomyLevel.L2_APPROVAL,
                                 AutonomyLevel.SHADOW,
@@ -98,9 +99,24 @@ class ServiceCatalog:
     }
 
     def set_level(self, key: str, to_level: AutonomyLevel) -> None:
+        """晋降级(不含 L3):对 L3_AUTO 一律拒绝——绕过准入门禁的
+        直升路径在 API 上不存在;降级(L3 → 更低)不设门槛。"""
         current = self._scopes[key]   # 未登记 scope 直接 KeyError
+        if to_level is AutonomyLevel.L3_AUTO:
+            raise ValueError(
+                "set_level 不能授予 L3_AUTO:唯一入口是 "
+                "admission.promote_to_l3(门禁重算 + 双人批准)")
         if to_level not in self._TRANSITIONS[current]:
             raise ValueError(
                 f"非法迁移 {current.value} -> {to_level.value}"
                 f"(合法: {sorted(l.value for l in self._TRANSITIONS[current])})")
         self._scopes[key] = to_level
+
+    def _grant_l3(self, key: str) -> None:
+        """内部通道:仅 admission.promote_to_l3 在门禁通过后调用。
+        只接受 L2_APPROVAL 起点——保持不可跳级、降级后禁直恢复 L3。"""
+        current = self._scopes[key]
+        if current is not AutonomyLevel.L2_APPROVAL:
+            raise ValueError(
+                f"L3 只能从 L2_APPROVAL 晋升,当前 {current.value}")
+        self._scopes[key] = AutonomyLevel.L3_AUTO

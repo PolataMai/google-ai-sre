@@ -105,8 +105,9 @@ def _cmd_replay(args) -> int:
 
 
 def _cmd_admission(args) -> int:
-    """L3 准入门禁:读试点指标 JSON，输出授权决定。
-    不达标退出码 1——开发完成不能凭空开 L3。"""
+    """L3 准入数据门:读试点指标 JSON,输出门禁计算结果。
+    不达标退出码 1;即便全过,授权仍须 admission.promote_to_l3
+    (双人已验证人类主体)——本命令只计算,不授权。"""
     raw = json.loads(Path(args.file).read_text(encoding="utf-8"))
     try:
         metrics = PilotMetrics(**raw)
@@ -114,7 +115,11 @@ def _cmd_admission(args) -> int:
         _print({"error": f"试点指标字段不完整: {exc}"})
         return 2
     decision = evaluate_l3_admission(metrics)
-    _print(decision.to_dict())
+    out = decision.to_dict()
+    out["next_step"] = ("数据门全过;授权须 promote_to_l3(双人批准)"
+                       if decision.l3_eligible
+                       else "数据门未过,缺口只能靠真实试点数据补齐")
+    _print(out)
     return 0 if decision.l3_eligible else 1
 
 

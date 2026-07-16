@@ -59,7 +59,8 @@ class GatewayHarness:
             if level != AutonomyLevel.SHADOW:
                 self.catalog.set_level(key, AutonomyLevel.L2_APPROVAL)
                 if level == AutonomyLevel.L3_AUTO:
-                    self.catalog.set_level(key, AutonomyLevel.L3_AUTO)
+                    # 测试夹具直取内部通道;生产路径是 admission.promote_to_l3
+                    self.catalog._grant_l3(key)
                 elif level == AutonomyLevel.SUSPENDED:
                     self.catalog.set_level(key, AutonomyLevel.SUSPENDED)
         self.authority = IdentityAuthority(secret="gw-secret")

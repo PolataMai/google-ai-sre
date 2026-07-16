@@ -162,27 +162,27 @@ class TestAdmissionCommand(unittest.TestCase):
             exact_match_hits=499, weeks_continuous_compliant=8,
             ai_change_failure_rate=0.03, baseline_change_failure_rate=0.05,
             policy_bypasses=0, severe_wrong_actions=0,
-            ai_caused_severe_incidents=0, fault_injection_pass_rate=1.0,
-            dual_approved=True)
+            ai_caused_severe_incidents=0, fault_injection_pass_rate=1.0)
 
-    def test_full_pass_exit_zero(self):
+    def test_full_pass_exit_zero_but_not_authorization(self):
         with tempfile.TemporaryDirectory() as tmp:
             code, out = self._run(tmp, self._full_pass())
         self.assertEqual(code, 0)
         self.assertTrue(out["l3_eligible"])
+        # 数据门全过 ≠ 已授权:输出必须指向 promote_to_l3 双人批准
+        self.assertIn("promote_to_l3", out["next_step"])
 
     def test_development_complete_exit_one(self):
         # 开发完成、回放刷满 Shadow,但没试点数据 → 退出 1,列出缺口
         m = self._full_pass()
         m.update(pilot_weeks=0.0, valid_incidents=0, real_l2_executions=0,
-                 weeks_continuous_compliant=0, ai_change_failure_rate=None,
-                 dual_approved=False)
+                 weeks_continuous_compliant=0, ai_change_failure_rate=None)
         with tempfile.TemporaryDirectory() as tmp:
             code, out = self._run(tmp, m)
         self.assertEqual(code, 1)
         self.assertFalse(out["l3_eligible"])
         self.assertIn("pilot_duration", out["blocking"])
-        self.assertIn("dual_approval", out["blocking"])
+        self.assertIn("real_l2_executions", out["blocking"])
 
 
 class TestValidateEnrichmentCommand(unittest.TestCase):

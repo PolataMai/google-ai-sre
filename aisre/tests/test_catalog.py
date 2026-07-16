@@ -88,7 +88,8 @@ class TestAutonomyScopes(unittest.TestCase):
 
 
 class TestAutonomyTransitions(unittest.TestCase):
-    """状态机:SHADOW → L2_APPROVAL → L3_AUTO;任意态可 SUSPENDED;不可跳级。"""
+    """状态机:SHADOW → L2_APPROVAL →(仅经 admission.promote_to_l3)→ L3_AUTO;
+    任意态可 SUSPENDED;set_level 对 L3_AUTO 一律拒绝——绕过门禁的路径不存在。"""
 
     def setUp(self):
         self.cat = ServiceCatalog()
@@ -100,13 +101,18 @@ class TestAutonomyTransitions(unittest.TestCase):
         self.cat.set_level(self.key, AutonomyLevel.L2_APPROVAL)
         self.assertEqual(self.cat.autonomy_level(self.key),
                          AutonomyLevel.L2_APPROVAL)
-        self.cat.set_level(self.key, AutonomyLevel.L3_AUTO)
+        self.cat._grant_l3(self.key)   # 内部通道,仅 admission.promote_to_l3 调用
         self.assertEqual(self.cat.autonomy_level(self.key),
                          AutonomyLevel.L3_AUTO)
 
-    def test_skip_level_promotion_rejected(self):
+    def test_set_level_refuses_l3_even_from_l2(self):
+        self.cat.set_level(self.key, AutonomyLevel.L2_APPROVAL)
         with self.assertRaises(ValueError):
-            self.cat.set_level(self.key, AutonomyLevel.L3_AUTO)  # SHADOW 直跳 L3
+            self.cat.set_level(self.key, AutonomyLevel.L3_AUTO)
+
+    def test_grant_l3_requires_l2_current_level(self):
+        with self.assertRaises(ValueError):
+            self.cat._grant_l3(self.key)   # SHADOW 直跳 L3 被拒
 
     def test_suspend_from_any_level_and_no_direct_l3_recovery(self):
         self.cat.set_level(self.key, AutonomyLevel.L2_APPROVAL)
@@ -114,10 +120,17 @@ class TestAutonomyTransitions(unittest.TestCase):
         self.assertEqual(self.cat.autonomy_level(self.key),
                          AutonomyLevel.SUSPENDED)
         with self.assertRaises(ValueError):
-            self.cat.set_level(self.key, AutonomyLevel.L3_AUTO)  # 降级后禁直恢复 L3
+            self.cat._grant_l3(self.key)   # 降级后禁直恢复 L3
         self.cat.set_level(self.key, AutonomyLevel.SHADOW)       # 只能回 SHADOW/L2
         self.assertEqual(self.cat.autonomy_level(self.key),
                          AutonomyLevel.SHADOW)
+
+    def test_demotion_from_l3_via_set_level_still_allowed(self):
+        self.cat.set_level(self.key, AutonomyLevel.L2_APPROVAL)
+        self.cat._grant_l3(self.key)
+        self.cat.set_level(self.key, AutonomyLevel.L2_APPROVAL)  # 降级不设门槛
+        self.assertEqual(self.cat.autonomy_level(self.key),
+                         AutonomyLevel.L2_APPROVAL)
 
     def test_unknown_scope_cannot_set_level(self):
         with self.assertRaises(KeyError):

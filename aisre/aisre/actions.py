@@ -54,6 +54,9 @@ class SuccessCriterion:
                 raise ValueError(
                     f"数值条件 {self.metric}{self.op} 需要数值 threshold,"
                     f"当前 {self.threshold!r}")
+            # 归一为 float:int/float 两种写法必须产生同一 plan_hash,
+            # 否则审批绑定对表示法敏感(frozen dataclass 须经 object.__setattr__)
+            object.__setattr__(self, "threshold", float(self.threshold))
         else:
             raise ValueError(f"未知比较符 {self.op!r}(仅支持 "
                              f"{sorted(_NUMERIC_OPS)} 或 is_true)")

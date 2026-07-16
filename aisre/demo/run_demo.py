@@ -10,7 +10,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from aisre.actions import ActionPlan, approve, is_approval_valid, validate_action_plan
-from aisre.admission import PilotMetrics, evaluate_l3_admission
+from aisre.admission import (AdmissionDenied, PilotMetrics, derive_pilot_counts,
+                             evaluate_l3_admission, promote_to_l3)
 from aisre.baseline import ChangeRecord, IncidentRecord, compute_baseline
 from aisre.board import build_board
 from aisre.catalog import ServiceCatalog, ServiceEntry
@@ -278,23 +279,39 @@ def main():
           f"{board['admission']['l3_readiness_preview']},"
           f"授权门禁={board['admission']['authoritative_gate']}")
 
-    # 13. L3 准入门禁:开发完成 ≠ 指标达标
+    # 13. L3 准入门禁:开发完成 ≠ 指标达标(结构性强制)
     step("13. L3 准入门禁(F12,开发完成 != 指标达标)")
+    # 可派生字段从本次 demo 的真实工件算出,不手填
+    derived = derive_pilot_counts(
+        shadow_ledger=ledger, shadow_log=shadow,
+        gateway_audit_dir=tmp, eval_report=eval_report)
+    print(f"从记录派生: {derived}")
     dev_complete = PilotMetrics(
-        pilot_weeks=0.0, valid_incidents=0,
-        shadow_cases=shadow.count() + ledger.count(),   # 回放能刷,但没试点
-        real_l2_executions=1, exact_match_total=eval_report.total_cases,
-        exact_match_hits=eval_report.exact_matches,
+        **derived,
+        pilot_weeks=0.0, valid_incidents=0,      # 没进过试点(人工证词)
         weeks_continuous_compliant=0,
-        ai_change_failure_rate=None,        # 没有真实变更数据
+        ai_change_failure_rate=None,             # 没有真实变更数据
         baseline_change_failure_rate=0.05,
         policy_bypasses=0, severe_wrong_actions=0,
-        ai_caused_severe_incidents=0, fault_injection_pass_rate=1.0,
-        dual_approved=False)
+        ai_caused_severe_incidents=0, fault_injection_pass_rate=1.0)
     decision = evaluate_l3_admission(dev_complete)
-    print(f"当前(开发完成)L3 授权: l3_eligible={decision.l3_eligible}")
-    print(f"仍缺 {len(decision.blocking)} 道门(只能靠真实试点补齐): "
-          f"{decision.blocking}")
+    print(f"数据门: l3_eligible={decision.l3_eligible},"
+          f"缺 {len(decision.blocking)} 道: {decision.blocking}")
+
+    # 绕过门禁直升 L3 的路径在 API 上不存在
+    try:
+        cat.set_level(key, AutonomyLevel.L3_AUTO)
+    except ValueError as exc:
+        print(f"set_level 直升 L3: 被拒({exc})")
+    # 即便找来两个真人批准,数据门未过也无法晋级
+    bob_token = authority.issue("bob", "human", issued_at=NOW,
+                                ttl_seconds=3600)
+    try:
+        promote_to_l3(catalog=cat, scope=key, metrics=dev_complete,
+                      authority=authority, approver_token_a=alice_token,
+                      approver_token_b=bob_token, now=NOW)
+    except AdmissionDenied as exc:
+        print(f"promote_to_l3(双人批准就位): 仍被拒,卡在 {exc.blocking}")
 
 
 def _load(name):

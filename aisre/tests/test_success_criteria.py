@@ -86,3 +86,23 @@ class TestSerialization(unittest.TestCase):
         with self.assertRaises(ValueError):
             SuccessCriterion.from_dict({"metric": "x", "op": "<",
                                         "threshold": None})
+
+    def test_threshold_canonicalized_to_float(self):
+        # int 阈值归一为 float:否则同一逻辑条件的 int/float 两种写法
+        # 会产生不同的 plan_hash,破坏审批绑定的表示法无关性
+        c = SuccessCriterion.from_dict({"metric": "slo_burn_rate", "op": "<",
+                                        "threshold": 2})
+        self.assertIsInstance(c.threshold, float)
+        self.assertEqual(c.to_dict(),
+                         SuccessCriterion.parse("slo_burn_rate<2").to_dict())
+
+    def test_plan_hash_stable_across_criterion_spellings(self):
+        from tests.test_actions import make_scale_out
+        h_int = make_scale_out(success_criteria=[
+            {"metric": "slo_burn_rate", "op": "<", "threshold": 2}]).plan_hash()
+        h_float = make_scale_out(success_criteria=[
+            {"metric": "slo_burn_rate", "op": "<", "threshold": 2.0}]).plan_hash()
+        h_parse = make_scale_out(
+            success_criteria=["slo_burn_rate<2"]).plan_hash()
+        self.assertEqual(h_int, h_float)
+        self.assertEqual(h_int, h_parse)
